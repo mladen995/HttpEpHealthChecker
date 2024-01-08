@@ -14,6 +14,7 @@ An HTTP endpoint health checker designed to test and monitor the availability of
 ## How to Use
 1. To run the script, the `-f` argument is mandatory. Use `-f` to specify the required file path (.yaml file) and optionally use `-h` to display usage instructions.
 2. Run the script using the command: `python main.py -f path\to\your\file.yaml`
+3. Exit from script using CTRL-C on keyboard
    
 ### Required Argument:
 - `-f, --file`: Path or name of the file containing input data.
