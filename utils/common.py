@@ -24,15 +24,15 @@ def CheckIsFileValid(file_path: str):
     '''
     # Check if path exists
     if not os.path.exists(file_path):
-        return False, "file_path does not exist."
+        return False, file_path + " does not exist."
 
     # Check if the path is a file
     if not os.path.isfile(file_path):
-        return False, "file_path does not point to a file."
+        return False, file_path + " does not point to a file."
 
     # Check read permission
     if not os.access(file_path, os.R_OK):
-        return False, "No read permission for the file."
+        return False, "No read permission for the: " + file_path
 
     return True, "File exists and is readable."
 

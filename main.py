@@ -15,6 +15,7 @@ functions:
 """
 import sys
 import getopt
+import os
 from http_request import CheckEndPointsHealth
 from utils.common import CheckIsFileValid, LoadYamlFile
 
@@ -60,7 +61,8 @@ def main(argv: str):
             usage()
         # Program initiated option
         elif opt in ("-f", "--filepath"):
-            filepath = variable
+            # Normalize the specified path
+            filepath = os.path.normpath(variable)
             # Check if configuration file is valid
             is_valid, message = CheckIsFileValid(filepath)
             if is_valid:
@@ -68,6 +70,10 @@ def main(argv: str):
                 data = LoadYamlFile(filepath)
                 # Initiate health checker for parsed data
                 CheckEndPointsHealth(data)
+            else:
+                print(message)
+                usage()
+                sys.exit()
         # Unsupported option
         else:
             usage()
