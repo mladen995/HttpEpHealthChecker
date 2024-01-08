@@ -11,15 +11,18 @@ results to the command line.
     * SendAllHttpRequests - function for sending all the HTTP requests from the configuration file
     * IsOutcomeUp - function for determinating outcome of each sent HTTP request
     * CalcAvailabilityPercentage - function for calculating availability percentage
+    * IsValidJsonFormat - function for JSON formatted string validation
+    * SetHttpReqData - prepare HTTP request data for sending on server
 """
 import time
 import requests
+import json
 import sys
 
 # Global constants
 DEFAULT_HTTP_METHOD = 'GET' # Default HTTP method
-DEFAULT_HTTP_HEADERS = '' # Default HTTP request header
-DEFAULT_HTTP_BODY = '' # Default HTTP request body
+DEFAULT_HTTP_HEADERS = None # Default HTTP request header
+DEFAULT_HTTP_BODY = None # Default HTTP request body
 
 UP_START_CODE = 200 # lower end of HTTP status code for UP outcome
 UP_END_CODE = 299 # upper end of HTTP status code for UP outcome
@@ -27,6 +30,18 @@ UP_MAX_LATENCY_MS = 500 # HTTP request latency from server response in milliscon
 HTTP_REQ_TIMEOUT_S = 0.5 # HTTP request timeout in seconds (for optimal solution this should be equivalent to UP_MAX_LATENCY_MS)
 
 CYCLE_DELAY = 15 # Cycle delay in seconds
+
+# Map request methods with belonging HTTP methods
+REQUEST_FUNCTIONS = {
+    "POST": requests.post,
+    "PUT": requests.put,
+    "DELETE": requests.delete,
+    "GET": requests.get,
+    "PATCH": requests.patch,
+    "HEAD": requests.head,
+    "OPTIONS": requests.options
+}
+
 # End of Global constants
 
 def CheckEndPointsHealth(data_from_yaml: dict, delay: int = CYCLE_DELAY):
@@ -65,7 +80,7 @@ def CheckEndPointsHealth(data_from_yaml: dict, delay: int = CYCLE_DELAY):
         raise SystemExit
 
 
-def SetUrlDomainGroups(data_from_yaml: dict):
+def SetUrlDomainGroups(data_from_yaml: dict, timeout: float = HTTP_REQ_TIMEOUT_S):
     '''
     Grouping HTTP endpoints by regarding URL domain
 
@@ -82,8 +97,8 @@ def SetUrlDomainGroups(data_from_yaml: dict):
     uri_path_separator = '/'
     # Loop through every endpoint
     for endpoint in data_from_yaml:
-        # Check url domain from endpoint
-        if 'url' in endpoint:
+        # Check for required endpoint elements
+        if "url" in endpoint and "name" in endpoint:
             # Extract url domain from complete web url
             try:
                 # Remove protocol tags prefix
@@ -99,58 +114,57 @@ def SetUrlDomainGroups(data_from_yaml: dict):
                 Reorganized data structure:
                 key -> url domain
                 value -> [data, total_requests, total_outcome_up]
-                    data: list of all relevant data for single endpoint which belongs to url domain
+                    data: list of all relevant data for single endpoint request which belongs to url domain
                     total_requests: counter of total HTTP requests sent to url domain
                     total_outcome_up: counter of total UP outcomes for all HTTP requests sent to url domain 
                 """
                 urls[url_domain] = {"data": [], "total_requests" : 0, "total_outcome_up" : 0}
-            # Append data list with endpoint relevant data    
-            urls[url_domain]["data"].append(endpoint)
-    # return new formated data
+            """
+            Endpoint request data:
+                key -> req_function
+                value -> request function
+
+                key -> url
+                value -> url argument for request function
+
+                key -> params
+                value -> paramteres for request function
+            """
+            endpoint_req_data = SetHttpReqData(endpoint, timeout)
+            # Append data list with endpoint relevant data
+            urls[url_domain]["data"].append(endpoint_req_data)
+
+    # Return formated data
     return urls
 
-def SendHttpRequest(endpoint: dict, timeout: float = HTTP_REQ_TIMEOUT_S):
+def SendHttpRequest(endpoint: dict):
     '''
     Send HTTP request to endpoint
 
             Parameters:
                     endpoint (dict): Endpoint relevant data
-                    timeout (float): Timeout for HTTP request
 
             Returns:
                     outcome (bool): Outcome for HTTP request
 
     '''
-    # Map request methods with belonging HTTP methods
-    request_functions = {
-        "POST": requests.post,
-        "PUT": requests.put,
-        "DELETE": requests.delete,
-        "GET": requests.get
-    }
-
-    # Set default value for each relevant endpoint data which is omitted in config file
-    method = DEFAULT_HTTP_METHOD if "method" not in endpoint else endpoint["method"]
-    headers = DEFAULT_HTTP_HEADERS if "headers" not in endpoint else endpoint["headers"]
-    body = DEFAULT_HTTP_BODY if "body" not in endpoint else endpoint["body"]
-
-    # Check if HTTP method for endpoint is valid
-    if method in request_functions:
-        # Assign request function for given HTTP method
-        request_func = request_functions[method]
-        try:
-            # Send HTTP request
-            r = request_func(endpoint["url"], data=body, headers=headers, timeout=timeout)
-        # Handle exception for sent HTTP request
-        except:
-            # Here we are sure that response is either not received in expected time or any other error on the server has occured
-            return False
-        # We need to calculate if response outcome is UP or DOWN
-        status_code = r.status_code
-        # Convert server latency in ms
-        latency_ms = round(r.elapsed.total_seconds(), 3) * 1000
-        # Return outcome status for sent HTTP request
-        return IsOutcomeUp(status_code, latency_ms)
+    try:
+        # Set HTTP request function, url and parameters for endpoint
+        request_func = endpoint["req_function"]
+        url = endpoint["url"]
+        params = endpoint["params"]
+        # Send HTTP request
+        r = request_func(url, **params)
+    # Handle exception for sent HTTP request
+    except Exception as e:
+        # Here we are sure that response is either not received in expected time or any other error on the server has occured
+        return False
+    # We need to calculate if response outcome is UP or DOWN
+    status_code = r.status_code
+    # Convert server latency in ms
+    latency_ms = round(r.elapsed.total_seconds(), 3) * 1000
+    # Return outcome status for sent HTTP request
+    return IsOutcomeUp(status_code, latency_ms)
 
 def SendAllHttpRequests(urls: dict):
     '''
@@ -202,3 +216,46 @@ def CalcAvailabilityPercentage(outcome_up_counter: int, total_req_counter: int):
     '''
     # Round floating-point availability percentages to the nearest whole percentage
     return round((outcome_up_counter / total_req_counter) * 100)
+
+def IsValidJsonFormat(jsonData: str):
+    '''
+    Validate if given string is JSON formatted
+
+            Parameters:
+                    jsonData (str): string for validation
+
+            Returns:
+                    status (bool): Validity status
+
+    '''
+    try:
+        json.loads(jsonData)
+    except ValueError as err:
+        return False
+    return True
+
+def SetHttpReqData(endpoint: dict, timeout: float):
+    '''
+    Preparing data for handling HTTP request
+
+            Parameters:
+                    endpoint (dict): endpoint data from config file
+                    timeout (float): timeout for HTTP request
+
+            Returns:
+                    object (dict): Relevant HTTP request data
+
+    '''
+    # Set default value for each relevant parameter for HTTP request
+    method = DEFAULT_HTTP_METHOD if "method" not in endpoint else endpoint["method"]
+    headers = DEFAULT_HTTP_HEADERS if "headers" not in endpoint else endpoint["headers"]
+    body = endpoint["body"] if "body" in endpoint and IsValidJsonFormat(endpoint["body"]) else DEFAULT_HTTP_BODY
+    # Set basic parameter for every type of HTTP request
+    params = {"timeout": timeout}
+    # Add additional parameters if needed
+    if body and method in ("POST", "PUT", "PATCH"):
+        params["data"] = body
+    if headers:
+        params["headers"] = headers
+    # Return formatted HTTP request relevant data
+    return {"req_function" : REQUEST_FUNCTIONS[method], "url": endpoint["url"], "params" : params}
