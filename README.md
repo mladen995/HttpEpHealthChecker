@@ -22,4 +22,4 @@ An HTTP endpoint health checker designed to test and monitor the availability of
 
 ## Example
 ```bash
-python2 main.py -f test\config.yaml
+python main.py -f test\config.yaml
